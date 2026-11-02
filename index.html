@@ -1,0 +1,316 @@
+
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Công cụ kiểm tra SSL/TLS</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    body { font-family: Arial, sans-serif; }
+    .result-card { overflow-wrap: anywhere; }
+  </style>
+</head>
+
+<body class="bg-slate-100 min-h-screen text-slate-800">
+  <header class="bg-white border-b">
+    <div class="max-w-5xl mx-auto px-5 py-5">
+      <h1 class="text-2xl font-bold text-blue-700">SSL/TLS Checker</h1>
+      <p class="text-gray-500 mt-1">Công cụ kiểm tra chứng chỉ bảo mật SSL của website</p>
+    </div>
+  </header>
+
+  <main class="max-w-5xl mx-auto px-5 py-10">
+    <section class="bg-white rounded-xl shadow-sm p-6">
+      <h2 class="text-xl font-bold mb-2">Kiểm tra chứng chỉ SSL</h2>
+      <p class="text-gray-500 text-sm mb-5">
+        Nhập tên miền website bạn muốn kiểm tra.
+      </p>
+
+      <div class="flex flex-col sm:flex-row gap-3">
+        <input
+          id="domainInput"
+          type="text"
+          placeholder="Ví dụ: google.com"
+          class="flex-1 border rounded-lg px-4 py-3 outline-none focus:ring-2 focus:ring-blue-500"
+        >
+        <button
+          id="checkBtn"
+          onclick="checkSSL()"
+          class="bg-blue-600 hover:bg-blue-700 text-white px-7 py-3 rounded-lg font-semibold"
+        >
+          Kiểm tra SSL
+        </button>
+      </div>
+
+      <p id="message" class="mt-4 text-sm text-gray-500">
+        Chưa có kết quả kiểm tra.
+      </p>
+    </section>
+
+    <section id="resultSection" class="hidden mt-6 space-y-5">
+      <div class="bg-white rounded-xl shadow-sm p-6">
+        <h2 class="font-bold text-lg mb-4">Tổng quan chứng chỉ</h2>
+
+        <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
+          <div class="result-card bg-slate-50 rounded-lg p-4">
+            <p class="text-sm text-gray-500">Tên miền</p>
+            <p id="domainResult" class="font-bold mt-2">--</p>
+          </div>
+
+          <div class="result-card bg-slate-50 rounded-lg p-4">
+            <p class="text-sm text-gray-500">Trạng thái SSL</p>
+            <p id="statusResult" class="font-bold mt-2">--</p>
+          </div>
+
+          <div class="result-card bg-slate-50 rounded-lg p-4">
+            <p class="text-sm text-gray-500">Ngày hết hạn</p>
+            <p id="expiryResult" class="font-bold mt-2">--</p>
+          </div>
+        </div>
+      </div>
+
+      <div class="bg-white rounded-xl shadow-sm p-6">
+        <h2 class="font-bold text-lg mb-4">Thông tin chứng chỉ</h2>
+        <div id="details" class="space-y-3"></div>
+      </div>
+
+      <div class="bg-white rounded-xl shadow-sm p-6">
+        <div class="flex justify-between items-center gap-3 mb-4">
+          <h2 class="font-bold text-lg">Dữ liệu kiểm tra</h2>
+          <button onclick="copyResult()"
+            class="text-blue-600 hover:underline text-sm font-semibold">
+            Sao chép kết quả
+          </button>
+        </div>
+        <pre id="rawResult"
+          class="bg-slate-900 text-green-300 p-4 rounded-lg text-xs overflow-auto max-h-96 whitespace-pre-wrap"></pre>
+      </div>
+    </section>
+
+    <section class="bg-white rounded-xl shadow-sm p-6 mt-6">
+      <h2 class="font-bold text-lg mb-3">SSL/TLS là gì?</h2>
+      <p class="text-gray-600 leading-7 text-sm">
+        SSL/TLS là công nghệ bảo mật giúp mã hóa dữ liệu trao đổi giữa
+        trình duyệt và máy chủ website. Chứng chỉ SSL hợp lệ giúp xác
+        thực tên miền và bảo vệ kết nối HTTPS.
+      </p>
+    </section>
+  </main>
+
+  <footer class="text-center text-gray-500 text-sm py-8">
+    Công cụ kiểm tra SSL/TLS
+  </footer>
+
+  <script>
+    const API_URL = "https://host.tools/api/v1/ssl/cert?q=";
+
+    let latestResult = null;
+
+    function normalizeDomain(value) {
+      let domain = value.trim();
+
+      domain = domain.replace(/^https?:\/\//i, "");
+      domain = domain.split("/")[0];
+      domain = domain.split("?")[0];
+
+      return domain;
+    }
+
+    function addDetail(label, value) {
+      const container = document.getElementById("details");
+
+      const row = document.createElement("div");
+      row.className =
+        "flex flex-col sm:flex-row sm:justify-between gap-1 border-b pb-3";
+
+      const name = document.createElement("span");
+      name.className = "text-gray-500 text-sm";
+      name.textContent = label;
+
+      const content = document.createElement("span");
+      content.className = "font-medium text-sm sm:text-right";
+      content.textContent =
+        value === undefined || value === null || value === ""
+          ? "Không có dữ liệu"
+          : typeof value === "object"
+            ? JSON.stringify(value)
+            : String(value);
+
+      row.appendChild(name);
+      row.appendChild(content);
+      container.appendChild(row);
+    }
+
+    function findValue(object, keys) {
+      if (!object || typeof object !== "object") return null;
+
+      for (const key of keys) {
+        if (object[key] !== undefined && object[key] !== null) {
+          return object[key];
+        }
+      }
+
+      return null;
+    }
+
+    function displayResult(data, domain) {
+      const result = data.output || data.data || data.result || data;
+
+      const detailsObject = Array.isArray(result)
+        ? result[0] || {}
+        : result;
+
+      const valid = findValue(detailsObject, [
+        "valid", "is_valid", "passCert", "certificate_valid"
+      ]);
+
+      const issuer = findValue(detailsObject, [
+        "issuer", "issuer_name", "certificate_issuer"
+      ]);
+
+      const expiry = findValue(detailsObject, [
+        "expires_at", "expiry", "valid_to", "not_after",
+        "expiration_date", "validUntil"
+      ]);
+
+      const subject = findValue(detailsObject, [
+        "subject", "commonName", "common_name", "hostname"
+      ]);
+
+      const protocol = findValue(detailsObject, [
+        "protocol", "tls_version", "version"
+      ]);
+
+      const days = findValue(detailsObject, [
+        "days_remaining", "days_left", "remaining_days"
+      ]);
+
+      document.getElementById("domainResult").textContent = domain;
+
+      const status = document.getElementById("statusResult");
+      if (valid === true) {
+        status.textContent = "Chứng chỉ hợp lệ";
+        status.className = "font-bold mt-2 text-green-600";
+      } else if (valid === false) {
+        status.textContent = "Chứng chỉ không hợp lệ";
+        status.className = "font-bold mt-2 text-red-600";
+      } else {
+        status.textContent = "Chưa xác định";
+        status.className = "font-bold mt-2 text-orange-600";
+      }
+
+      document.getElementById("expiryResult").textContent =
+        expiry || "--";
+
+      const details = document.getElementById("details");
+      details.innerHTML = "";
+
+      addDetail("Tên miền kiểm tra", domain);
+      addDetail("Tên chứng chỉ", subject);
+      addDetail("Đơn vị cấp chứng chỉ", issuer);
+      addDetail("Ngày hết hạn", expiry);
+      addDetail("Giao thức TLS", protocol);
+      addDetail("Số ngày còn lại", days);
+
+      if (Array.isArray(result)) {
+        result.forEach((certificate, index) => {
+          addDetail(
+            "Chứng chỉ trong chuỗi " + (index + 1),
+            certificate
+          );
+        });
+      }
+
+      document.getElementById("rawResult").textContent =
+        JSON.stringify(data, null, 2);
+
+      document.getElementById("resultSection").classList.remove("hidden");
+    }
+
+    async function checkSSL() {
+      const input = document.getElementById("domainInput").value;
+      const domain = normalizeDomain(input);
+      const message = document.getElementById("message");
+      const button = document.getElementById("checkBtn");
+
+      if (!domain) {
+        message.textContent = "Vui lòng nhập tên miền cần kiểm tra.";
+        message.className = "mt-4 text-sm text-red-600";
+        return;
+      }
+
+      if (
+        !/^(?=.{1,253}$)(?:[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,63}$/.test(domain)
+      ) {
+        message.textContent = "Tên miền không hợp lệ. Ví dụ: google.com";
+        message.className = "mt-4 text-sm text-red-600";
+        return;
+      }
+
+      button.disabled = true;
+      button.textContent = "Đang kiểm tra...";
+      button.classList.add("opacity-60", "cursor-not-allowed");
+
+      message.textContent = "Đang kết nối và kiểm tra chứng chỉ SSL...";
+      message.className = "mt-4 text-sm text-blue-600";
+
+      document.getElementById("resultSection").classList.add("hidden");
+
+      try {
+        const response = await fetch(
+          API_URL + encodeURIComponent(domain)
+        );
+
+        if (!response.ok) {
+          throw new Error("Máy chủ kiểm tra trả về lỗi HTTP " + response.status);
+        }
+
+        const data = await response.json();
+
+        if (data.error || data.success === false) {
+          throw new Error(
+            data.error?.message || data.message || "Không thể kiểm tra SSL."
+          );
+        }
+
+        latestResult = data;
+        displayResult(data, domain);
+
+        message.textContent = "Đã hoàn thành kiểm tra SSL.";
+        message.className = "mt-4 text-sm text-green-600";
+
+      } catch (error) {
+        message.textContent =
+          "Không thể kiểm tra: " + error.message +
+          ". Bạn hãy thử lại sau hoặc kiểm tra kết nối mạng.";
+        message.className = "mt-4 text-sm text-red-600";
+      } finally {
+        button.disabled = false;
+        button.textContent = "Kiểm tra SSL";
+        button.classList.remove("opacity-60", "cursor-not-allowed");
+      }
+    }
+
+    async function copyResult() {
+      if (!latestResult) return;
+
+      try {
+        await navigator.clipboard.writeText(
+          JSON.stringify(latestResult, null, 2)
+        );
+        alert("Đã sao chép kết quả!");
+      } catch {
+        alert("Không thể sao chép. Bạn hãy thử lại.");
+      }
+    }
+
+    document.getElementById("domainInput").addEventListener(
+      "keydown",
+      function(event) {
+        if (event.key === "Enter") checkSSL();
+      }
+    );
+  </script>
+</body>
+</html>
